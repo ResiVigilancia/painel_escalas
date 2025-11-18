@@ -1,0 +1,695 @@
+# app.R ------------------------------------------------------------
+# Calculadora de Escalas de Enfermagem
+# Pacotes necessários:
+# install.packages(c("shiny", "bs4Dash"))
+
+library(shiny)
+library(bs4Dash)
+
+#---------------------------
+# FUNÇÕES AUXILIARES
+#---------------------------
+
+interpreta_braden <- function(score) {
+  if (is.na(score)) return("")
+  if (score <= 9)  "Risco MUITO alto"
+  else if (score <= 12) "Risco alto"
+  else if (score <= 14) "Risco moderado"
+  else "Risco baixo / mínimo"
+}
+
+interpreta_morse <- function(score) {
+  if (is.na(score)) return("")
+  if (score < 25) "Risco baixo de queda"
+  else if (score < 45) "Risco moderado de queda"
+  else "Risco alto de queda"
+}
+
+interpreta_news <- function(score) {
+  if (is.na(score)) return("")
+  if (score == 0) "Baixo risco"
+  else if (score <= 4) "Risco baixo/moderado – reavaliar"
+  else if (score <= 6) "Risco moderado – alertar equipe"
+  else "Risco alto – avaliação médica imediata"
+}
+
+interpreta_glasgow <- function(score) {
+  if (is.na(score)) return("")
+  if (score <= 8) "Coma / TCE grave (≤ 8)"
+  else if (score <= 12) "TCE moderado (9–12)"
+  else "TCE leve / consciência preservada (13–15)"
+}
+
+interpreta_rass <- function(score) {
+  if (is.na(score)) return("")
+  # RASS vai de -5 a +4
+  if (score >= 2) "Agitação / agressividade"
+  else if (score == 1) "Inquieto"
+  else if (score == 0) "Alerta e calmo"
+  else if (score >= -2) "Sedação leve"
+  else "Sedação profunda"
+}
+
+interpreta_eva <- function(score) {
+  if (is.na(score)) return("")
+  if (score == 0) "Sem dor"
+  else if (score <= 3) "Dor leve"
+  else if (score <= 6) "Dor moderada"
+  else "Dor intensa"
+}
+
+interpreta_cam_icu <- function(inatencao, pensamento, consciencia) {
+  # Versão super simplificada: se qualquer critério principal positivo → provável delirium
+  if (any(is.na(c(inatencao, pensamento, consciencia)))) return("")
+  if (inatencao == "Sim" && (pensamento == "Sim" || consciencia == "Sim")) {
+    "Triagem positiva para delirium (CAM-ICU simplificado)"
+  } else {
+    "Triagem negativa para delirium (CAM-ICU simplificado)"
+  }
+}
+
+interpreta_apgar <- function(score) {
+  if (is.na(score)) return("")
+  if (score <= 3) "RN em condição grave"
+  else if (score <= 6) "RN com moderada depressão"
+  else "RN em boas condições"
+}
+
+interpreta_sofa <- function(score) {
+  if (is.na(score)) return("")
+  if (score <= 4) "Baixa gravidade (SOFA ≤ 4)"
+  else if (score <= 9) "Gravidade intermediária (SOFA 5–9)"
+  else "Alta gravidade / alto risco de mortalidade (SOFA ≥ 10)"
+}
+
+interpreta_katz <- function(score) {
+  if (is.na(score)) return("")
+  if (score == 6) "Independente em ABVD"
+  else if (score >= 4) "Dependência parcial"
+  else "Dependência importante"
+}
+
+#---------------------------
+# UI
+#---------------------------
+
+ui <- bs4DashPage(
+  title = "Calculadora de Escalas de Enfermagem",
+  dark = FALSE,
+  header = bs4DashNavbar(
+    title = "Escalas de Enfermagem"
+  ),
+  sidebar = bs4DashSidebar(
+    skin = "light",
+    status = "primary",
+    brandColor = "primary",
+    bs4SidebarMenu(
+      bs4SidebarHeader("Escalas de risco"),
+      bs4SidebarMenuItem("Braden", tabName = "braden", icon = icon("bed")),
+      bs4SidebarMenuItem("Morse", tabName = "morse", icon = icon("walking")),
+      bs4SidebarMenuItem("NEWS", tabName = "news", icon = icon("heartbeat")),
+      bs4SidebarHeader("Estado neurológico"),
+      bs4SidebarMenuItem("Glasgow", tabName = "glasgow", icon = icon("brain")),
+      bs4SidebarMenuItem("RASS", tabName = "rass", icon = icon("adjust")),
+      bs4SidebarMenuItem("CAM-ICU", tabName = "camicu", icon = icon("user-md")),
+      bs4SidebarHeader("Dor, RN, Funcionalidade, UTI"),
+      bs4SidebarMenuItem("Dor (EVA)", tabName = "eva", icon = icon("thermometer-half")),
+      bs4SidebarMenuItem("Apgar", tabName = "apgar", icon = icon("baby")),
+      bs4SidebarMenuItem("SOFA (simplificado)", tabName = "sofa", icon = icon("hospital")),
+      bs4SidebarMenuItem("Katz", tabName = "katz", icon = icon("user-check"))
+    )
+  ),
+  body = bs4DashBody(
+    bs4TabItems(
+
+      #---------------- BRADEN ----------------
+      bs4TabItem(
+        tabName = "braden",
+        fluidRow(
+          bs4Card(
+            title = "Escala de Braden – Risco de Lesão por Pressão",
+            width = 6,
+            status = "primary",
+            solidHeader = TRUE,
+            collapsible = TRUE,
+            column(12,
+              selectInput("braden_sens", "Percepção sensorial",
+                          choices = c(
+                            "1 - Completamente limitada" = 1,
+                            "2 - Muito limitada" = 2,
+                            "3 - Levemente limitada" = 3,
+                            "4 - Nenhuma limitação" = 4
+                          ), selected = 4),
+              selectInput("braden_umid", "Umidade",
+                          choices = c(
+                            "1 - Constantemente úmida" = 1,
+                            "2 - Muito úmida" = 2,
+                            "3 - Ocasionalmente úmida" = 3,
+                            "4 - Raramente úmida" = 4
+                          ), selected = 4),
+              selectInput("braden_ativ", "Atividade",
+                          choices = c(
+                            "1 - Acamado" = 1,
+                            "2 - Cadeirante" = 2,
+                            "3 - Anda ocasionalmente" = 3,
+                            "4 - Anda frequentemente" = 4
+                          ), selected = 4),
+              selectInput("braden_mob", "Mobilidade",
+                          choices = c(
+                            "1 - Completamente imóvel" = 1,
+                            "2 - Muito limitada" = 2,
+                            "3 - Levemente limitada" = 3,
+                            "4 - Sem limitações" = 4
+                          ), selected = 4),
+              selectInput("braden_nut", "Nutrição",
+                          choices = c(
+                            "1 - Muito pobre" = 1,
+                            "2 - Provavelmente inadequada" = 2,
+                            "3 - Adequada" = 3,
+                            "4 - Excelente" = 4
+                          ), selected = 3),
+              selectInput("braden_fric", "Fricção e cisalhamento",
+                          choices = c(
+                            "1 - Problema" = 1,
+                            "2 - Problema em potencial" = 2,
+                            "3 - Nenhum aparente" = 3
+                          ), selected = 3)
+            )
+          ),
+          bs4Card(
+            title = "Resultado",
+            width = 6,
+            status = "info",
+            solidHeader = TRUE,
+            h4("Escore total:"),
+            textOutput("braden_score"),
+            br(),
+            h4("Interpretação:"),
+            textOutput("braden_interp")
+          )
+        )
+      ),
+
+      #---------------- MORSE ----------------
+      bs4TabItem(
+        tabName = "morse",
+        fluidRow(
+          bs4Card(
+            title = "Escala de Morse – Risco de Quedas",
+            width = 6,
+            status = "primary",
+            solidHeader = TRUE,
+            checkboxGroupInput(
+              "morse_itens", "Selecione os itens presentes:",
+              choices = list(
+                "Histórico de quedas" = "hist_queda",
+                "Diagnóstico secundário" = "diag_sec",
+                "Auxílio na deambulação (bengala, muleta, andador)" = "auxilio",
+                "Uso de soro/ dispositivo endovenoso" = "iv",
+                "Marcha comprometida (fraca/ prejudicada)" = "marcha",
+                "Estado mental confuso/ esquecido das limitações" = "mental"
+              )
+            )
+          ),
+          bs4Card(
+            title = "Resultado",
+            width = 6,
+            status = "info",
+            solidHeader = TRUE,
+            h4("Escore total:"),
+            textOutput("morse_score"),
+            br(),
+            h4("Interpretação:"),
+            textOutput("morse_interp")
+          )
+        )
+      ),
+
+      #---------------- NEWS ----------------
+      bs4TabItem(
+        tabName = "news",
+        fluidRow(
+          bs4Card(
+            title = "NEWS – Early Warning Score (simplificado)",
+            width = 6,
+            status = "primary",
+            solidHeader = TRUE,
+            numericInput("news_fr", "Frequência respiratória (irpm)", value = 16, min = 0),
+            numericInput("news_spo2", "SpO2 (%)", value = 98, min = 0, max = 100),
+            numericInput("news_pas", "PA sistólica (mmHg)", value = 120, min = 0),
+            numericInput("news_fc", "Frequência cardíaca (bpm)", value = 80, min = 0),
+            numericInput("news_temp", "Temperatura (°C)", value = 36.5, min = 30, max = 43),
+            selectInput("news_consc", "Nível de consciência (AVPU)",
+                        choices = c("Alerta" = 0, "Reage à voz/ dor ou inconsciente" = 3),
+                        selected = 0)
+          ),
+          bs4Card(
+            title = "Resultado",
+            width = 6,
+            status = "info",
+            solidHeader = TRUE,
+            h4("Escore total:"),
+            textOutput("news_score"),
+            br(),
+            h4("Interpretação:"),
+            textOutput("news_interp")
+          )
+        )
+      ),
+
+      #---------------- GLASGOW ----------------
+      bs4TabItem(
+        tabName = "glasgow",
+        fluidRow(
+          bs4Card(
+            title = "Escala de Coma de Glasgow",
+            width = 6,
+            status = "primary",
+            solidHeader = TRUE,
+            selectInput("gcs_olhos", "Abertura ocular",
+                        choices = c(
+                          "1 - Nenhuma" = 1,
+                          "2 - Ao estímulo doloroso" = 2,
+                          "3 - Ao chamado" = 3,
+                          "4 - Espontânea" = 4
+                        ), selected = 4),
+            selectInput("gcs_verbal", "Resposta verbal",
+                        choices = c(
+                          "1 - Nenhuma" = 1,
+                          "2 - Sons incompreensíveis" = 2,
+                          "3 - Palavras inadequadas" = 3,
+                          "4 - Confuso" = 4,
+                          "5 - Orientado" = 5
+                        ), selected = 5),
+            selectInput("gcs_motora", "Resposta motora",
+                        choices = c(
+                          "1 - Nenhuma" = 1,
+                          "2 - Extensão anormal" = 2,
+                          "3 - Flexão anormal" = 3,
+                          "4 - Retirada à dor" = 4,
+                          "5 - Localiza a dor" = 5,
+                          "6 - Obedece comandos" = 6
+                        ), selected = 6)
+          ),
+          bs4Card(
+            title = "Resultado",
+            width = 6,
+            status = "info",
+            solidHeader = TRUE,
+            h4("Escore total:"),
+            textOutput("gcs_score"),
+            br(),
+            h4("Interpretação:"),
+            textOutput("gcs_interp")
+          )
+        )
+      ),
+
+      #---------------- RASS ----------------
+      bs4TabItem(
+        tabName = "rass",
+        fluidRow(
+          bs4Card(
+            title = "RASS – Richmond Agitation-Sedation Scale",
+            width = 6,
+            status = "primary",
+            solidHeader = TRUE,
+            sliderInput("rass_score", "Selecione o nível (de -5 a +4):",
+                        min = -5, max = 4, value = 0, step = 1)
+          ),
+          bs4Card(
+            title = "Resultado",
+            width = 6,
+            status = "info",
+            solidHeader = TRUE,
+            h4("Escore RASS:"),
+            textOutput("rass_val"),
+            br(),
+            h4("Interpretação:"),
+            textOutput("rass_interp")
+          )
+        )
+      ),
+
+      #---------------- CAM-ICU ----------------
+      bs4TabItem(
+        tabName = "camicu",
+        fluidRow(
+          bs4Card(
+            title = "CAM-ICU (versão simplificada para triagem)",
+            width = 6,
+            status = "primary",
+            solidHeader = TRUE,
+            selectInput("cam_inatencao", "Inatenção (ex.: erros em teste de atenção simples)",
+                        choices = c("Não" = "Não", "Sim" = "Sim")),
+            selectInput("cam_pensamento", "Pensamento desorganizado (fala desconexa, respostas ilógicas)",
+                        choices = c("Não" = "Não", "Sim" = "Sim")),
+            selectInput("cam_consc", "Alteração do nível de consciência (não alerta / flutuante)",
+                        choices = c("Não" = "Não", "Sim" = "Sim"))
+          ),
+          bs4Card(
+            title = "Resultado",
+            width = 6,
+            status = "info",
+            solidHeader = TRUE,
+            h4("Conclusão:"),
+            textOutput("camicu_interp"),
+            br(),
+            helpText("Obs: versão simplificada, apenas para fins educacionais. Validar sempre com protocolo oficial.")
+          )
+        )
+      ),
+
+      #---------------- DOR (EVA) ----------------
+      bs4TabItem(
+        tabName = "eva",
+        fluidRow(
+          bs4Card(
+            title = "Escala Visual Analógica / Numérica de Dor (0–10)",
+            width = 6,
+            status = "primary",
+            solidHeader = TRUE,
+            sliderInput("eva_score", "Intensidade da dor:", min = 0, max = 10, value = 0)
+          ),
+          bs4Card(
+            title = "Resultado",
+            width = 6,
+            status = "info",
+            solidHeader = TRUE,
+            h4("Escore EVA:"),
+            textOutput("eva_val"),
+            br(),
+            h4("Interpretação:"),
+            textOutput("eva_interp")
+          )
+        )
+      ),
+
+      #---------------- APGAR ----------------
+      bs4TabItem(
+        tabName = "apgar",
+        fluidRow(
+          bs4Card(
+            title = "Apgar do recém-nascido",
+            width = 6,
+            status = "primary",
+            solidHeader = TRUE,
+            selectInput("apgar_fc", "Frequência cardíaca",
+                        choices = c("0 - Ausente" = 0, "1 - < 100 bpm" = 1, "2 - ≥ 100 bpm" = 2), selected = 2),
+            selectInput("apgar_resp", "Esforço respiratório",
+                        choices = c("0 - Ausente" = 0, "1 - Fraco / irregular" = 1, "2 - Choro vigoroso" = 2), selected = 2),
+            selectInput("apgar_tonus", "Tônus muscular",
+                        choices = c("0 - Flácido" = 0, "1 - Alguma flexão" = 1, "2 - Movimento ativo" = 2), selected = 2),
+            selectInput("apgar_reflexo", "Irritabilidade reflexa",
+                        choices = c("0 - Ausente" = 0, "1 - Careta" = 1, "2 - Choro / espirro" = 2), selected = 2),
+            selectInput("apgar_cor", "Cor da pele",
+                        choices = c("0 - Cianótico / pálido" = 0,
+                                    "1 - Corpo rosado, extremidades cianóticas" = 1,
+                                    "2 - Rosado por completo" = 2), selected = 2)
+          ),
+          bs4Card(
+            title = "Resultado",
+            width = 6,
+            status = "info",
+            solidHeader = TRUE,
+            h4("Escore Apgar (0–10):"),
+            textOutput("apgar_score"),
+            br(),
+            h4("Interpretação:"),
+            textOutput("apgar_interp")
+          )
+        )
+      ),
+
+      #---------------- SOFA (simplificado) ----------------
+      bs4TabItem(
+        tabName = "sofa",
+        fluidRow(
+          bs4Card(
+            title = "SOFA – Sequential Organ Failure Assessment (simplificado)",
+            width = 6,
+            status = "primary",
+            solidHeader = TRUE,
+            numericInput("sofa_resp", "Respiração (PaO2/FiO2 → escore 0–4)", value = 0, min = 0, max = 4),
+            numericInput("sofa_coag", "Coagulação (Plaquetas → escore 0–4)", value = 0, min = 0, max = 4),
+            numericInput("sofa_fgado", "Fígado (Bilirrubina → escore 0–4)", value = 0, min = 0, max = 4),
+            numericInput("sofa_cardiov", "Cardiovascular (PA/vasoativo → escore 0–4)", value = 0, min = 0, max = 4),
+            numericInput("sofa_snc", "Sistema nervoso central (Glasgow → escore 0–4)", value = 0, min = 0, max = 4),
+            numericInput("sofa_renal", "Rins (Creatinina/diurese → escore 0–4)", value = 0, min = 0, max = 4),
+            helpText("Obs: entradas já em forma de escore (0–4) para cada órgão, para simplificar.")
+          ),
+          bs4Card(
+            title = "Resultado",
+            width = 6,
+            status = "info",
+            solidHeader = TRUE,
+            h4("Escore SOFA total:"),
+            textOutput("sofa_score"),
+            br(),
+            h4("Interpretação:"),
+            textOutput("sofa_interp")
+          )
+        )
+      ),
+
+      #---------------- KATZ ----------------
+      bs4TabItem(
+        tabName = "katz",
+        fluidRow(
+          bs4Card(
+            title = "Katz – Atividades Básicas de Vida Diária",
+            width = 6,
+            status = "primary",
+            solidHeader = TRUE,
+            checkboxGroupInput(
+              "katz_abvd",
+              "Marque as funções que o paciente realiza de forma INDEPENDENTE:",
+              choices = c(
+                "Banho" = "banho",
+                "Vestir-se" = "vestir",
+                "Ir ao sanitário" = "sanitario",
+                "Transferência (ex.: leito↔cadeira)" = "transferencia",
+                "Continência" = "continencia",
+                "Alimentação" = "alimentacao"
+              )
+            )
+          ),
+          bs4Card(
+            title = "Resultado",
+            width = 6,
+            status = "info",
+            solidHeader = TRUE,
+            h4("Escore Katz (0–6):"),
+            textOutput("katz_score"),
+            br(),
+            h4("Interpretação:"),
+            textOutput("katz_interp")
+          )
+        )
+      )
+
+    )
+  )
+)
+
+#---------------------------
+# SERVER
+#---------------------------
+
+server <- function(input, output, session) {
+
+  # BRADEN
+  output$braden_score <- renderText({
+    vals <- as.numeric(c(
+      input$braden_sens,
+      input$braden_umid,
+      input$braden_ativ,
+      input$braden_mob,
+      input$braden_nut,
+      input$braden_fric
+    ))
+    total <- sum(vals, na.rm = TRUE)
+    total
+  })
+
+  output$braden_interp <- renderText({
+    vals <- as.numeric(c(
+      input$braden_sens,
+      input$braden_umid,
+      input$braden_ativ,
+      input$braden_mob,
+      input$braden_nut,
+      input$braden_fric
+    ))
+    total <- sum(vals, na.rm = TRUE)
+    interpreta_braden(total)
+  })
+
+  # MORSE – pontuação simples baseada em itens selecionados
+  output$morse_score <- renderText({
+    itens <- input$morse_itens
+    score <- 0
+    if ("hist_queda" %in% itens) score <- score + 25
+    if ("diag_sec" %in% itens) score <- score + 15
+    if ("auxilio" %in% itens) score <- score + 15
+    if ("iv" %in% itens) score <- score + 20
+    if ("marcha" %in% itens) score <- score + 30
+    if ("mental" %in% itens) score <- score + 15
+    score
+  })
+
+  output$morse_interp <- renderText({
+    itens <- input$morse_itens
+    score <- 0
+    if ("hist_queda" %in% itens) score <- score + 25
+    if ("diag_sec" %in% itens) score <- score + 15
+    if ("auxilio" %in% itens) score <- score + 15
+    if ("iv" %in% itens) score <- score + 20
+    if ("marcha" %in% itens) score <- score + 30
+    if ("mental" %in% itens) score <- score + 15
+    interpreta_morse(score)
+  })
+
+  # NEWS – versão simplificada com regras aproximadas
+  output$news_score <- renderText({
+    # Cada parâmetro vira um escore simplificado (não é a tabela oficial completa)
+    fr  <- input$news_fr
+    spo2 <- input$news_spo2
+    pas <- input$news_pas
+    fc  <- input$news_fc
+    temp <- input$news_temp
+    cons <- as.numeric(input$news_consc)
+
+    esc_fr <- ifelse(fr < 8 | fr > 25, 3,
+                     ifelse(fr >= 21, 2,
+                            ifelse(fr >= 9 & fr <= 20, 0, 1)))
+    esc_spo2 <- ifelse(spo2 < 91, 3,
+                       ifelse(spo2 <= 93, 2,
+                              ifelse(spo2 <= 95, 1, 0)))
+    esc_pas <- ifelse(pas <= 90, 3,
+                      ifelse(pas <= 100, 2,
+                             ifelse(pas <= 110, 1,
+                                    ifelse(pas <= 220, 0, 3))))
+    esc_fc <- ifelse(fc <= 40 | fc >= 131, 3,
+                     ifelse(fc <= 50 | fc >= 111, 1,
+                            ifelse(fc <= 90, 0, 2)))
+    esc_temp <- ifelse(temp < 35, 3,
+                       ifelse(temp <= 36, 1,
+                              ifelse(temp <= 38, 0,
+                                     ifelse(temp <= 39, 1, 2))))
+
+    total <- esc_fr + esc_spo2 + esc_pas + esc_fc + esc_temp + cons
+    total
+  })
+
+  output$news_interp <- renderText({
+    total <- as.numeric(output$news_score())
+    interpreta_news(total)
+  })
+
+  # GLASGOW
+  output$gcs_score <- renderText({
+    sum(as.numeric(input$gcs_olhos),
+        as.numeric(input$gcs_verbal),
+        as.numeric(input$gcs_motora),
+        na.rm = TRUE)
+  })
+
+  output$gcs_interp <- renderText({
+    score <- sum(as.numeric(input$gcs_olhos),
+                 as.numeric(input$gcs_verbal),
+                 as.numeric(input$gcs_motora),
+                 na.rm = TRUE)
+    interpreta_glasgow(score)
+  })
+
+  # RASS
+  output$rass_val <- renderText({
+    input$rass_score
+  })
+
+  output$rass_interp <- renderText({
+    interpreta_rass(input$rass_score)
+  })
+
+  # CAM-ICU
+  output$camicu_interp <- renderText({
+    interpreta_cam_icu(
+      inatencao = input$cam_inatencao,
+      pensamento = input$cam_pensamento,
+      consciencia = input$cam_consc
+    )
+  })
+
+  # Dor – EVA
+  output$eva_val <- renderText({
+    input$eva_score
+  })
+
+  output$eva_interp <- renderText({
+    interpreta_eva(input$eva_score)
+  })
+
+  # Apgar
+  output$apgar_score <- renderText({
+    sum(
+      as.numeric(input$apgar_fc),
+      as.numeric(input$apgar_resp),
+      as.numeric(input$apgar_tonus),
+      as.numeric(input$apgar_reflexo),
+      as.numeric(input$apgar_cor),
+      na.rm = TRUE
+    )
+  })
+
+  output$apgar_interp <- renderText({
+    score <- sum(
+      as.numeric(input$apgar_fc),
+      as.numeric(input$apgar_resp),
+      as.numeric(input$apgar_tonus),
+      as.numeric(input$apgar_reflexo),
+      as.numeric(input$apgar_cor),
+      na.rm = TRUE
+    )
+    interpreta_apgar(score)
+  })
+
+  # SOFA – entradas já são os escores (0–4) de cada órgão
+  output$sofa_score <- renderText({
+    sum(
+      input$sofa_resp,
+      input$sofa_coag,
+      input$sofa_fgado,
+      input$sofa_cardiov,
+      input$sofa_snc,
+      input$sofa_renal,
+      na.rm = TRUE
+    )
+  })
+
+  output$sofa_interp <- renderText({
+    score <- sum(
+      input$sofa_resp,
+      input$sofa_coag,
+      input$sofa_fgado,
+      input$sofa_cardiov,
+      input$sofa_snc,
+      input$sofa_renal,
+      na.rm = TRUE
+    )
+    interpreta_sofa(score)
+  })
+
+  # KATZ
+  output$katz_score <- renderText({
+    length(input$katz_abvd)
+  })
+
+  output$katz_interp <- renderText({
+    score <- length(input$katz_abvd)
+    interpreta_katz(score)
+  })
+}
+
+shinyApp(ui, server)
+  
