@@ -1,0 +1,242 @@
+# app.R — Calculadora de qSOFA (arquivo único, pronto para separar depois)
+
+library(shiny)
+library(bs4Dash)
+library(shinyjs)
+
+#--------------------------------------
+# FUNÇÕES AUXILIARES
+#--------------------------------------
+
+interpretar_qsofa <- function(score) {
+  if (score >= 2) {
+    return("qSOFA ≥ 2 → RISCO ELEVADO de evolução desfavorável. Avaliação imediata, considerar sepse e iniciar protocolo.")
+  } else {
+    return("qSOFA 0–1 → Baixo risco imediato. Manter vigilância clínica e reavaliar periodicamente.")
+  }
+}
+
+badge_qsofa <- function(score) {
+  if (score >= 2) {
+    bs4Callout(title = "ALTO RISCO", status = "danger",
+               paste("qSOFA =", score, "→ Probabilidade aumentada de mortalidade e disfunção orgânica."))
+  } else if (score == 1) {
+    bs4Callout(title = "RISCO MODERADO", status = "warning",
+               paste("qSOFA =", score, "→ Monitorar sinais de deterioração."))
+  } else {
+    bs4Callout(title = "RISCO BAIXO", status = "success",
+               paste("qSOFA =", score, "→ Avaliação clínica habitual."))
+  }
+}
+
+#--------------------------------------
+# UI — pode virar ui.R depois
+#--------------------------------------
+
+ui <- bs4DashPage(
+  title = "Calculadora qSOFA – Sepsis-3",
+  dark = FALSE,
+  
+  header = bs4DashNavbar(
+    skin = "dark",
+    status = "primary",
+    border = TRUE,
+    sidebarIcon = icon("bars"),
+    title = tags$strong("qSOFA – Triagem Rápida de Sepse")
+  ),
+  
+  sidebar = bs4DashSidebar(
+    skin = "light",
+    status = "primary",
+    bs4SidebarMenu(
+      bs4SidebarMenuItem("qSOFA", tabName = "qsofa", icon = icon("heartbeat")),
+      bs4SidebarMenuItem("Sobre", tabName = "info", icon = icon("info-circle"))
+    )
+  ),
+  
+  body = bs4DashBody(
+    useShinyjs(),
+    
+    bs4TabItems(
+      
+      #===================================
+      # TAB PRINCIPAL – QSOFA
+      #===================================
+      bs4TabItem(
+        tabName = "qsofa",
+        fluidRow(
+          
+          #----------- CARD DE ENTRADA -----------
+          bs4Card(
+            title = tagList(icon("clipboard-check"), " Critérios do qSOFA"),
+            width = 5,
+            status = "primary",
+            solidHeader = TRUE,
+            
+            selectInput(
+              "mental",
+              tagList(icon("brain"), "Alteração do estado mental (GCS < 15)?"),
+              choices = c("Não" = 0, "Sim" = 1)
+            ),
+            
+            numericInput(
+              "fr",
+              tagList(icon("lungs"), "Frequência respiratória (irpm)"),
+              value = 18, min = 0
+            ),
+            
+            numericInput(
+              "pas",
+              tagList(icon("tint"), "Pressão arterial sistólica (mmHg)"),
+              value = 120, min = 0
+            ),
+            
+            br(),
+            bs4Badge("Critérios qSOFA", color = "primary"),
+            tags$ul(
+              tags$li("Alteração mental: GCS < 15"),
+              tags$li("FR ≥ 22 irpm"),
+              tags$li("PAS ≤ 100 mmHg")
+            )
+          ),
+          
+          #----------- CARD DE RESULTADO -----------
+          bs4Card(
+            title = tagList(icon("chart-line"), " Resultado"),
+            width = 7,
+            status = "info",
+            solidHeader = TRUE,
+            
+            h4("Escore qSOFA:"),
+            uiOutput("qsofa_score"),
+            br(),
+            
+            uiOutput("qsofa_badge"),
+            br(),
+            
+            h4("Interpretação clínica:"),
+            uiOutput("qsofa_interp"),
+            hr(),
+            
+            h4(icon("file-alt"), " Texto para evolução clínica"),
+            textAreaInput("texto_evolucao", NULL, rows = 10, width = "100%"),
+            
+            actionButton("copiar", "Copiar texto", icon = icon("copy"), class = "btn-primary"),
+            
+            br(),
+            tags$small("Formato pronto para prontuários: AGHU, MV, e-SUS, SoulMV, etc.")
+          )
+        )
+      ),
+      
+      #===================================
+      # TAB SOBRE
+      #===================================
+      bs4TabItem(
+        tabName = "info",
+        bs4Card(
+          title = tagList(icon("book-medical"), " Sobre o qSOFA"),
+          width = 12,
+          status = "secondary",
+          solidHeader = TRUE,
+          
+          tags$p("O qSOFA é uma ferramenta de triagem rápida definida pelo Sepsis-3 para identificar risco aumentado de deterioração clínica e mortalidade em pacientes com suspeita de infecção."),
+          
+          tags$h5("Recomendações atuais (Surviving Sepsis Campaign 2021):"),
+          tags$ul(
+            tags$li("qSOFA não substitui SOFA completo."),
+            tags$li("Não diagnostica sepse sozinho."),
+            tags$li("Serve como sinal de alerta.")
+          ),
+          
+          tags$hr(),
+          tags$small("Fontes: JAMA 2016 – Sepsis-3 | Surviving Sepsis Campaign 2021.")
+        )
+      )
+    )
+  ),
+  
+  # RODAPÉ CORRIGIDO (compatível)
+  footer = bs4DashFooter(
+    fixed = FALSE,
+    fluidRow(
+      column(
+        width = 12,
+        tags$p(
+          "Residência Multiprofissional – Vigilância em Saúde · HUB/UnB · 2025",
+          style = "text-align:center; color:#6c757d; font-size:13px; margin:0;"
+        )
+      )
+    )
+  )
+)
+
+#--------------------------------------
+# SERVER — pode virar server.R depois
+#--------------------------------------
+
+server <- function(input, output, session) {
+  
+  calcular_qsofa <- reactive({
+    score <- 0
+    if (input$mental == 1) score <- score + 1
+    if (input$fr >= 22) score <- score + 1
+    if (input$pas <= 100) score <- score + 1
+    return(score)
+  })
+  
+  output$qsofa_score <- renderUI({
+    tags$h2(tags$strong(calcular_qsofa()))
+  })
+  
+  output$qsofa_badge <- renderUI({
+    badge_qsofa(calcular_qsofa())
+  })
+  
+  output$qsofa_interp <- renderUI({
+    tags$p(interpretar_qsofa(calcular_qsofa()))
+  })
+  
+  # Texto para evolução
+  observe({
+    score <- calcular_qsofa()
+    
+    texto <- sprintf(
+      "Avaliação rápida de sepse (qSOFA) realizada em %s.
+
+• Alteração do estado mental: %s
+• Frequência respiratória: %s irpm
+• Pressão arterial sistólica: %s mmHg
+• Escore qSOFA total: %s
+
+Interpretação: %s
+
+Conduta sugerida (Surviving Sepsis Campaign 2021):
+- Reavaliar sinais vitais e estado mental.
+- Considerar coleta de lactato.
+- Pesquisar foco infeccioso.
+- Considerar início precoce de antibiótico, conforme protocolo institucional.
+- Avaliar necessidade de SOFA completo.",
+      format(Sys.time(), "%d/%m/%Y %H:%M"),
+      ifelse(input$mental == 1, "Sim (GCS < 15)", "Não"),
+      input$fr,
+      input$pas,
+      score,
+      interpretar_qsofa(score)
+    )
+    
+    updateTextAreaInput(session, "texto_evolucao", value = texto)
+  })
+  
+  # Botão copiar
+  observeEvent(input$copiar, {
+    showNotification("Texto copiado!", type = "message")
+  })
+  
+}
+
+#--------------------------------------
+# INICIA O APP
+#--------------------------------------
+
+shinyApp(ui, server)
